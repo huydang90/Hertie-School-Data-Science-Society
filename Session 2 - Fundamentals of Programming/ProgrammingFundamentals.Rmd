@@ -1,0 +1,412 @@
+---
+title: "Programming Fundamentals"
+author: "Marina Wyss"
+date: "8/18/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Agenda
+* Data types
+    * Numeric/integers
+    * Strings
+    * Booleans
+    * Factors
+* Data structures
+    * Vectors
+    * Matrices
+    * Data frames
+    * Lists
+* Comparison Operators
+* Logical Operators
+* if, else if, else statements
+* for loops
+* while loops
+* functions
+* Exercises
+* Solutions
+
+<i> Some examples in this worksheet are inspired by Pierian Data's Python and R courses on Udemy.</i><br>
+<br>
+This worksheet is available in both <b>R</b> and <b>Python</b> (R below of course), with some minor differences. We think it's important to become familiar with Python early on, since it is also a very popular language and will be necessary to know if you want to pursue a career with data. Some key points about the two:
+<ul>
+<li> R comes from stats, Python comes from computer science</li>
+<li> So, R has many statistical methods that aren't available or are more challenging in Python, and Python has some machine learning/AI capabilities that aren't possible in R.</li>
+<li> Python is a full-on programming language, with options far beyond data analysis.</li>
+<li> R is more common in academia.</li>
+</ul>
+Neither is "harder" to learn than the other - it's more a matter of what you're used to. It makes sense to practice both as much as possible.
+
+Boefore diving right into our agenda, we will quickly load a data set `hflights` from the `hflights` package. We will apply some of the knowledge learned from this session on the data set.
+```{r}
+#install.packages("hflights") #this line has been commented, you can remove the hash tag to uncomment and install the package
+library(hflights)
+data(hflights)
+head(hflights, 10) #get first 10 rows of the data set
+```
+
+Integers: only whole numbers, though often R just considers them numerics. Often the distinction isn't really important.
+### integer
+```{r}
+# include L at the end to tell R it's an integer and not normal numeric
+fourInt <- 2L + 2L
+class(fourInt)
+
+#ascertain the data type of the year column of hflights
+class(hflights$Year)
+```
+
+
+### numeric
+Numerics: can be whole numbers or doubles/floats with decimals
+```{r}
+four <- 2 + 2
+class(four)
+
+flo <- 2.5 - 1.7
+class(flo)
+```
+
+### string
+Usually enclosed in single or double quotes.
+Can be characters or numeric, but will be stored as characters.
+```{r}
+hi <- "Hello world"
+class(hi)
+typeof(hi) #you could also use typeof() to ascetain data type
+
+numString <- "12345"
+class(numString)
+
+class(hflights$UniqueCarrier)
+```
+
+### booleans
+True/false. Must be in caps. Can be either the whole word or just T/F, though the whole word is better form.
+```{r}
+TRUE
+T
+
+FALSE
+F
+```
+
+### factors
+Categorical variables.  They are useful when you want to display character vectors in a non-alphabetical order. 
+```{r}
+x <- c("Dec", "Mar", "Aug", "Sep")
+typeof(x)
+sort(x) #sorted alphabetically, but not the way you want
+
+month <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+y <- factor(x, levels = month)
+sort(y) #now it sorts in 'monthly' sequential order
+
+# can also create an ordered factor for ordinal variables
+sizes <- c(rep("Large", 3), rep("Medium", 3), rep("Small",3))
+sizes
+sizes2 <- ordered(sizes)
+str(sizes2)
+
+sizes <- ordered(sizes, levels = c("Small", "Medium", "Large")) #change the order
+str(sizes)
+```
+
+### vectors
+One-dimensional vector that must have all the same element type. A sequence of data elements of the same data type.
+```{r}
+num <- 1:10
+num
+
+num * 2
+
+vec <- rep("meow", 10)
+```
+
+### matrices
+A matrix is a collection of data elements arranged in a two-dimensional rectangular layout. All columns in a matrix must have the same class (numeric, character, etc.) and the same length.
+```{r}
+mat <- matrix(1:9, nrow = 3, ncol = 3, byrow = TRUE)
+mat
+ 
+mat_2 <- mat * 2 #numerical operation possible with matrices
+
+# indexing a matrix; finding locationof an element in [row, column] order
+mat[2, 1]
+mat_2[1, 3]
+```
+
+### data frames
+Basically a "spreadsheet". Two-dimensional. Key is that they can have different data types. Each column must be of one data type.
+```{r}
+names <- c('Tom', 'Nick', 'Sally', 'Joe')
+ages <- c(20, 21, 19, 18)
+gender <- c("Male", "Male", "Male", "Female")
+myData <- data.frame(ages, names, gender)
+myData
+names(myData) <- c("Age", "Name", "Gender")
+
+myData
+```
+
+
+Let's do some fun operations with our `hflights` dataset. We install the `dplyr` package and load the library.
+```{r}
+#install.packages("dplyr")
+
+library(dplyr)
+
+head(hflights) #check the first 6 rows
+
+#check for the names of the columns in the data set
+names(hflights)
+
+#create a new data set, with three selected columns that you'd like to work with
+hflights2 <- hflights %>% select(Year, Month, Dest) 
+head(hflights2)
+```
+
+### lists
+An ordered collection of objects (components). A list allows you to gather a variety of (possibly unrelated) objects under one name. For example, could have a few data frames, a matrix, etc.
+```{r}
+myList <- list(hflights2[1:5,], mat, x)
+myList
+```
+
+#comparison operators
+```{r}
+1 > 2
+1 < 2
+1 >= 1
+1 <= 4
+1 == 1
+'hi' == 'bye'
+```
+ 
+### logical operators
+
+```{r}
+# all statements must be true to return TRUE when using "and"
+(1 > 2) & (2 < 3)
+
+# only one statement must be true to return TRUE when using "or", denoted with |
+(1 > 2) | (2 < 3)
+
+(1 == 2) | (2 == 3) | (4 == 2)
+
+names(hflights)
+
+hflights3 <- hflights %>% select(Year, Month) %>% 
+  filter(Month %in% c(1,2)) #get only the first and second months
+
+head(hflights3)
+tail(hflights3)
+
+#check for the unique values of Month column to confirm that you have only months 1 and 2
+unique(hflights3$Month) 
+```
+
+### if, else, if else
+```{r}
+if (1 < 2){ 
+  print('yep!')
+}
+
+if (1 < 2){
+    print('first')
+} else {
+    print('last')
+}
+
+if (1 == 2){
+  print('first')
+} else if(3 == 3) {
+  print('middle')
+} else {
+  print('last')
+}
+```
+
+### for loops
+for each item, perform some action.
+```{r}
+for(hertie in hflights$Year[1:5]) { #print the first five rows of Year 
+  print(hertie)
+}
+
+nums <- 1:5
+
+for (item in nums){
+  print(item)
+}
+
+for (item in nums){
+  print("Yep")
+}
+
+# can use whatever word to iterate over
+for (cake in nums){
+  print(cake + cake)
+}
+```
+
+### while loops
+while loops are a way to have your program continuously run some block of code until a condition is met (or in other words, while a certain condition is true). 
+
+A major concern when working with a while loop is to make sure that at some point the condition should become true, otherwise the while loop will go forever! 
+```{r}
+i <- 1
+
+while (i < 5){
+  print(paste0("i is: ", i))
+  i <- i + 1
+}
+```
+
+### functions
+Formally, a function is a useful device that groups together a set of statements so they can be run more than once. They can also let us specify parameters that can serve as inputs to the functions.
+
+On a more fundamental level, functions allow us to not have to repeatedly write the same code again and again. 
+```{r}
+# basic structure
+functionName <- function(someInput) {
+  # some action to perform
+}
+
+# example 1
+square <- function(x){
+  print(x^2)
+}
+
+square(2)
+
+# example 2
+greeting <- function(name){
+    print(paste('Hi ', name))
+}
+
+greeting("dude")
+
+# example 3
+addNum <- function(num1, num2){
+    print(num1 + num2)
+}
+```
+
+Now, here's a more complicated example. It will return the lesser of two given numbers if both numbers are even, but returns the greater if one or both numbers are odd. <br>
+For example: 
+* lesser_of_two_evens(2, 4) would return 2
+* lesser_of_two_evens(2, 5) would return 5
+
+```{r}
+lesser_of_two_evens <- function(a, b){
+  if ((a %% 2) == 0 & (b %% 2) == 0){
+    print(min(a, b))
+  } else {
+    print(max(a, b))
+  }
+}
+
+lesser_of_two_evens(2, 4)
+lesser_of_two_evens(2, 5)
+```
+
+## Exercises:
+Now we're going to practice a bit! Here are some tasks:
+<ol>
+<li> Write a script that prints "Hello" if the variable X is equal to 1</li>
+<li> Write a script that prints "Even Number" if the variable X is an even number, otherwise prints "Not Even"</li>
+<li> White a script that prints the numbers 1 through 10 using a for loop. </li>
+<li> White a script that prints the numbers 1 through 10 using a while loop. </li>
+<li> Create a function that takes in a name as a string argument, and prints out "Hello name"</li>
+<li> Create a function that will return the product of two integers.</li>
+<li> Challenge one: Create a function that will return TRUE if an input integer is prime. Otherwise, return FALSE. </li>
+</ol>
+
+## Solutions
+
+### 1
+```{r}
+x <- 1
+
+if (x ==1){
+    print("Hello")
+}
+```
+
+### 2
+```{r}
+x <- 3 # change x to test
+
+if (x %% 2 == 0){
+    print('Even Number')
+}else{
+    print('Not Even')
+}
+```
+
+### 3
+```{r}
+x <- 1
+
+for (i in 1:10){
+  print(x)
+  x <- x + 1
+}
+
+```
+
+### 4
+```{r}
+counter <- 1
+
+while(counter < 11){
+	print(counter)
+	counter <- counter + 1
+}
+
+```
+
+### 5
+```{r}
+helloYou <- function(name){
+    print(paste('Hello',name))
+}
+
+helloYou("Jerry")
+```
+
+### 6
+```{r}
+prod <- function(num1, num2){
+    return(num1 * num2)
+}
+
+prod(3, 4)
+```
+
+### 7
+```{r}
+primeCheck <- function(num){
+  # Could put more checks for negative numbers etc...
+  if (num == 2) {
+    return(TRUE)
+  }
+  for (x in 2:(num - 1)){
+      
+    if ((num %% x) == 0){
+      return(FALSE)
+    }
+  }
+  return(TRUE)
+}
+
+primeCheck(2)
+primeCheck(8)
+primeCheck(11)
+```
+
+
