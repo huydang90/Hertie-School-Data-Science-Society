@@ -1,0 +1,233 @@
+---
+title: "Linear Regression - Example Project"
+output: html_document
+---
+
+```{r setup, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(readr)
+library(dplyr)
+library(GGally)
+library(kableExtra)
+library(caTools)
+library(stargazer)
+```
+# Scenario
+
+Imagine that you've just got some contract work with an e-commerce company that sells clothing online, but they also have in-store style and clothing advice sessions. Customers come in to the store, have sessions/meetings with a personal stylist, then they can go home and order the clothes they want either on a mobile app or website.
+
+The company is trying to decide whether to focus their efforts on their mobile app experience or their website. 
+
+<i>The data is obviously fake, and this example is heavily inspired by Pierian Data's Python course on Udemy.</i>
+
+## Get the Data & Take a Look
+```{r data, message=FALSE}
+# read in the Ecommerce Customers csv file as a DataFrame called customers.
+customers <- read_csv("EcommerceCustomers")
+```
+We'll work with an Ecommerce Customers csv file from the company. It has customer info, such as email, address, and their color avatar. Then it also has numerical value columns:
+
+* Avg. Session Length: Average session length of in-store style advice sessions in minutes
+* Time on App: Average time spent on the app in minutes
+* Time on Website: Average time spent on the website in minutes
+* Length of Membership: How many years the customer has been a member
+
+```{r exploring the data}
+head(customers)
+summary(customers)
+str(customers)
+```
+
+```{r any null, message=FALSE, warning=FALSE}
+# checking if we have any NA values
+any(is.na(customers))
+
+# a cool way to visualize this is with a missingness map, here's an example
+library(Amelia)
+missmap(airquality)
+```
+
+## Data Manipulation/Clean-up
+Let's drop the unused columns. This isn't necessary in this case, but let's just do it for practice.
+```{r dropping cols}
+customers <- customers %>% select(-Email, -Address, -Avatar)
+```
+
+Then, let's change the column names to get rid of the spaces. They are annoying in R.
+```{r renaming}
+customers <- customers %>% 
+  rename(
+    avgSessionLength = 'Avg. Session Length',
+    timeOnApp = 'Time on App',
+    timeOnWebsite = 'Time on Website',
+    lengthOfMembership = 'Length of Membership',
+    yearlyAmountSpent =  'Yearly Amount Spent'
+    )
+```
+Since we don't have any categorical data, let's create a new column for gender. Here we create a new column that has gender as a factor of Male and Female, with 60% women and 40% men.
+
+```{r new gender col}
+customers$Gender <- as.factor(sample(c("Female", "Male"), 
+                                     size = length(customers$yearlyAmountSpent), 
+                                     replace = TRUE, 
+                                     prob = c(0.60, 0.40)))
+```
+Just to make it a bit more interesting, let's change their spending behaviors a bit.
+
+```{r mutate}
+customers$yearlyAmountSpent <- ifelse(customers$`Gender` == 'Male', 
+       customers$yearlyAmountSpent * 0.75, 
+       customers$yearlyAmountSpent)
+
+customers$lengthOfMembership <- ifelse(customers$`Gender` == 'Male', 
+       customers$lengthOfMembership * 1.10, 
+       customers$lengthOfMembership)
+
+customers$timeOnApp <- ifelse(customers$`Gender` == 'Male', 
+       customers$timeOnApp * 0.85, 
+       customers$timeOnApp)
+
+# checking that it worked
+kable(customers %>% 
+        group_by(Gender) %>% 
+        summarise_all("mean")) %>%
+        kable_styling()
+```
+
+
+## Exploratory Data Analysis
+We want to plot our data to check some assumptions, or if there are things we need to be aware of.
+```{r normal, message = FALSE}
+# is y close to normally distributed?
+
+## base R version
+hist(customers$yearlyAmountSpent)
+
+## simple ggplot
+ggplot(customers, aes(x = yearlyAmountSpent)) + 
+  geom_histogram(fill = "#5DBCD2", color = "black")
+```
+<br> Yep, looking good.
+
+```{r outlier plot, message = FALSE}
+# are there outliers?
+
+## base R 
+boxplot(yearlyAmountSpent ~ Gender, data = customers)
+
+## simple ggplot
+ggplot(customers, aes(x = Gender, y = yearlyAmountSpent)) + 
+  geom_boxplot(aes(fill = Gender))
+```
+<br>It looks like we have a few, but they aren't super extreme. We should check that these are logical and not the result of measurement errors, but in this case, we'll just leave them.
+
+```{r pairs, message = FALSE}
+# let's look at pair-wise correlations for all the variables
+ggpairs(customers)
+```
+<br>Length of Membership and Time on App seem to be the most relevant factors. Let's investigate a bit more.
+
+```{r plotting lm, message = FALSE}
+# simple ggplot
+ggplot(customers, aes(x = lengthOfMembership, y = yearlyAmountSpent, color = Gender)) + 
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE)
+
+ggplot(customers, aes(x = timeOnApp, y = yearlyAmountSpent, color = Gender)) + 
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE)
+```
+<br>Both factors seem relevant, but looking at this, Length of Membership seems to be most strongly correlated. 
+
+## Training and Test Data
+
+```{r train test}
+# set a random seed so your "random" results are the same 
+set.seed(101) 
+
+# split up the sample (basically randomly assigns a booleans to a new column "sample")
+sample <- sample.split(customers$yearlyAmountSpent, SplitRatio = 0.70) 
+
+# training Data
+train <- subset(customers, sample == TRUE)
+
+# test Data
+test <- subset(customers, sample == FALSE)
+```
+
+## Model-building
+Now, it's time to model our data!
+```{r lm}
+# we create the model using training data
+model <- lm(yearlyAmountSpent ~ avgSessionLength + 
+              timeOnApp + 
+              timeOnWebsite + 
+              lengthOfMembership + 
+              Gender, 
+            data = train)
+```
+
+## Prediction
+```{r preds}
+# we predict using test data
+predictions <- predict(model, test)
+
+ggplot(test, aes(x = yearlyAmountSpent, y = predictions)) + 
+  geom_point() +
+  labs(y = "predicted y", x = "y test")
+```
+<br>Our model is doing very well! It would be a completely straight line with the points on top of each other if it was perfect. 
+
+## Model Evaluation
+<br>Let's evaluate our model performance by calculating the mean squared error, the root mean squared error, and the explained variance score (R-squared).
+
+The mean squared error is the average of squared differences between the prediction and the actual observation, in units of the dependent variable. Root mean squared error is, obviously, the square root of that. We want these values to be as low as possible. 
+
+```{r math stuff}
+results <- cbind(predictions, test$yearlyAmountSpent) 
+colnames(results) <- c('pred','real')
+results <- as.data.frame(results)
+
+mse <- mean((results$real-results$pred)^2)
+            
+print(paste0("MSE: ", mse))
+print(paste0("RMSE: ", mse^0.5))
+```
+
+<br>Then, let's plot the residuals.
+
+```{r residuals}
+res <- as.data.frame(residuals(model))
+
+ggplot(res, aes(x = residuals(model))) +  geom_histogram(bins = 50)
+```
+<br>Our residuals look normally distributed. Hooray.
+
+## Interpretation
+Since we know our model is looking good, let's take a stab at evaluating our model:
+
+```{r model, results='asis'}
+stargazer(model, 
+          type = "html", 
+          intercept.bottom = FALSE)
+```
+<br>
+<br>
+Interpreting the model output:
+
+- Our <b>Constant</b>, or the intercept, is non-sensical in this case. There is no one who has not ever been a member in our data set. We will not interpret this.
+- Holding all other features fixed, a 1 unit increase in <b>Avg. Session Length</b> is associated with an <b>increase of 22.53 total dollars spent</b>.
+- Holding all other features fixed, a 1 unit increase in <b>Time on App</b> is associated with an <b>increase of 36.69 total dollars spent</b>.
+- Holding all other features fixed, a 1 unit increase in <b>Time on Website</b> is associated with an <b>increase of 0.10 total dollars spent</b>.
+- Holding all other features fixed, a 1 unit increase in <b>Length of Membership</b> is associated with an <b>increase of 51.40 total dollars spent</b>.
+- Holding all other features fixed, being <b>Male</b> is associated with an <b>decrease of 77.51 total dollars spent.</b>
+
+### Conclusions
+<b>So, what should the company do? Invest more in the app or website?</b>
+
+There are two ways to think about this: they could develop the website to catch up to the performance of the mobile app, or develop the app more since that is what is working better. 
+<br>
+<br>
+Their research question also might be more nuanced than they originally thought, and they may want to further explore the relationship between Length of Membership and the app or the website, whether there should be different strategies for men and women, whether there are potentially other factors (geography, income, age) that should be included into the strategy, etc., before coming to a conclusion.
