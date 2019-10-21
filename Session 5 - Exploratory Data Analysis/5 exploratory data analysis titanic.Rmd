@@ -1,0 +1,215 @@
+---
+title: "5 Exploratory Data Analysis"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r}
+library(tidyverse)
+```
+
+## Understanding the data
+
+```{r}
+library(titanic)
+df <- titanic_train
+
+
+#first overview
+head(df)
+#realization that we do not know what variables are -> understand the data
+#look at it again and realize variables that seem mostly unique values, first look at size and structure
+
+
+dim(df)
+str(df) 
+# realize character variables, also you may want to check unique values - e.g. by str() with factors (displays levels)
+#View(df)
+```
+
+## See which data could be useful
+```{r}
+df$Name <- as.factor(df$Name)
+# df$Name <- df$Name %>% as.factor()
+str(df$Name)
+
+df[, c("Name", "Sex", "Ticket", "Cabin", "Embarked")] <-  lapply(df[, c("Name", "Sex", "Ticket", "Cabin", "Embarked")], as.factor)
+# lapply(df, mean)
+
+str(df)
+#realize: Name, Ticket have too many distinct values (too many to generalize upon)- yet Name could be used to identify families or see if title matters (feature engineering is not focus of this class)
+# same goes for Cabin (yet could be used for approx position on ship)
+df$PassengerId %>% unique() %>% length() #Same for PassengerId (no variation that helps explaining survival) - PassengerId and Ticket are even random
+#realize: some NAs hiding in Embarked as "" 
+```
+
+
+```{r}
+df <- df %>% select(-Name, -Ticket, -PassengerId)
+str(df) #variables are out
+```
+## Check out the NAs
+```{r}
+#NAs
+df[df$Embarked == "", "Embarked"] <- NA 
+#NAs are important to look at because you might not have the data you think you have
+colSums(is.na(df))
+
+library(naniar)
+vis_miss(df)
+
+df <- df %>% select(-Cabin) #too many NAs, also too much to deal with now
+
+# What to do with NAs here? 
+# Generally you have two options: remove every row with a NA (you lose data) or impute the NAs with something that makes sense, e.g. its mean or a 0 (preferably s.th. better informed; you might bias your model)
+# So be careful and curious! Especially in causal analysis: missingness might have a pattern (e.g. due to the data generating process, maybe useful); in prediction we care only about how we best inform our model 
+# Models usually kick out NAs, so be aware of that
+
+# We do not want to spend too much time on NAs so we just kick them out now (you shouldn't finalize that decision here)
+
+# summary(df[is.na(df$Age)==TRUE,])
+
+df <- df %>%  filter(is.na(df$Age)==FALSE)
+df$Embarked %>% is.na() %>% sum()
+df <- df %>% filter(is.na(df$Embarked)==FALSE)
+dim(df)
+
+```
+
+```{r}
+str(df)
+```
+
+
+## Each Variable by itself
+```{r}
+summary(df)
+# Realize: 40% survived, more men than women, etc. but also the difference between factor and numerical variables
+
+library(skimr)
+skimr::skim(df)
+
+plot1 <- ggplot(data = df, mapping = aes(x = df$Survived))
+plot1 + geom_bar()
+
+
+# facet example
+df %>% gather() %>%
+  ggplot(mapping = aes(x = value)) +
+  facet_wrap(~ key, scales = "free") +
+  geom_histogram(stat="count")
+
+# df1 <- df %>% gather()
+# Realize: distributions, possible outliers
+
+```
+
+
+
+## Check for Outliers
+```{r}
+
+a <- df %>% ggplot(mapping = aes(x=factor(0), y=Age)) + geom_boxplot()
+
+b <- df %>% ggplot(aes(x=factor(0), y=Fare)) + geom_boxplot()
+c <- df %>% ggplot(aes(x=factor(0), y=Parch)) + geom_boxplot()
+
+library(ggpubr)
+ggarrange(a,b,c)
+```
+
+
+
+## Relationship between the outcome variable and the others
+```{r, message=FALSE}
+library(GGally)
+ggpairs(df)
+df$Sex <- as.numeric(df$Sex)-1
+ggpairs(df)
+
+library(corrplot)
+cplot <- df %>%
+  select_if(is.numeric) %>%
+  cor(use="complete.obs") %>%
+  corrplot.mixed(tl.cex=0.85)
+
+```
+### Go into further analysis with Survival
+
+#### First: Make a plot look beautiful (THEME)
+```{r}
+df$Survived <- as.factor(df$Survived)
+
+#basis
+p <- ggplot(data = df, mapping = aes(x=Pclass, fill=Survived)) + geom_bar(alpha=0.5)
+
+#labels
+p <- p +  ylab("Survival Rate")+ ggtitle("Survival Rate by Class")
+
+#colours
+library(wesanderson)
+p <- p + scale_fill_manual(values = wes_palette("Darjeeling1"))
+
+#theme (to adjust non-data components)
+p + theme(legend.position = "top", axis.text=element_text(size=15), axis.text.x = element_text(angle = 90))
+
+#given themes 
+library(ggthemes)
+p + theme_economist() 
+
+p + theme_minimal()
+```
+
+
+
+
+```{r}
+ggplot(data= df, mapping= aes(x= Fare, fill=Survived)) + geom_histogram(aes(y=..density..)) 
+```
+
+
+Here, the point is to get to know geom_point()
+```{r}
+p <- ggplot(data=df, mapping = aes(x= Age, y = Fare, color=Survived)) + geom_point()
+p+ geom_smooth()
+p + geom_smooth(method="lm", formula = y ~ poly(x, 3), se = FALSE)
+```
+
+
+## Do it yourself: relationship between Pclass and Survived and other questions you might have
+```{r}
+ggplot(data = df, mapping = aes(x=as.factor(Sex), fill=Survived)) + geom_bar()
+```
+
+Extended:
+```{r}
+library(scales)
+ggplot(data = df, mapping = aes(x=as.factor(Sex), fill=Survived)) + geom_bar(aes(y= (..count..)/sum(..count..)))+scale_y_continuous(labels=scales::percent)
+```
+
+Extended: Alluvial Diagram
+```{r}
+library(alluvial)
+
+tbl_summary <- df %>% 
+  group_by(Survived, Sex, Pclass) %>%
+  summarise(N = n()) %>% 
+  ungroup
+
+alluvial(tbl_summary[, c(1:3)],
+         freq=tbl_summary$N, border=NA,
+         col=ifelse(tbl_summary$Survived == "1", "blue", "gray"),
+         cex=0.65,
+         ordering = list(
+         order(tbl_summary$Survived, tbl_summary$Pclass==1),
+         order(tbl_summary$Sex, tbl_summary$Pclass==1),NULL))
+
+
+```
+
+
+
+
+
