@@ -1,0 +1,233 @@
+---
+title: "Session 6: Data Wrangling"
+author: "Aje Joshua Ayodele"
+date: "27 October 2019"
+output: html_document
+---
+
+## Introduction
+Data wrangling (used interchangeably with data munging) involves tidying your data, manipulating it, and if necessary, creating new variables from the current data to get your data in a proper form for further analysis by you or by others. In this session, we will work with the WHO dataset `tidyr::who` which contains tuberculosis cases  broken down by year, country, age, gender, and diagnosis method.
+
+This session is heavily inspired by the `tidy data` section of Hadley Wickham's R for Data Science book.
+
+*Objective*: To compute the total number of cases of TB for each country, year, and sex. To make an informative visualisation of the data.
+
+
+For this session, We make use of functions from a couple of `tidyverse` packages.
+
+```{r setup, warning=FALSE, message=FALSE}
+#load libraries
+library(tidyverse)
+```
+
+### Data Inspection
+After loading the data, the first step in data wrangling is to inspect the data. 
+
+```{r data import and inspection}
+#load the data
+data(who)
+
+#check the first few rows to initialize the data
+head(who)
+
+#plot to see columns with missing values
+#install.packages("naniar")
+library(naniar)
+gg_miss_var(who)
+```
+
+As with most real-life data, this data is very messy, which makes it difficult to start working with it in this form. What are the first few things we notice?
+
+* There are some redundant variables i.e., `country`, `iso2`, `iso3` represent the same thing  
+* There are a lot of missing values in the columns   
+* Given the pattern in the variable names (e.g. `new_sp_m014`, `new_sn_m014`, `new_ep_m014`, `newrel_m014`), these variables seem to be categories/ values than variables
+
+### Data Structuring
+
+We begin tidying the data by checking for the columns that aren't variables. The three golden rules of tidy data are:
+
+* Each variable must have its own column  
+* Each observation must have its own row  
+* Each value must have its own cell
+
+For illustration, this is a classic example of a dataset where the columns `1999` and `2000` are meant to be values and not variables. To tidy it, we gather `1999` and `2000` into a new column `year`. 
+
+```{r gather illustration}
+table1 <- tibble(country = c("Brazil", "Nigeria", "China"),
+                 "1999" = c(32134, 78737, 182349),
+                 "2000" = c(56823, 95275, 190620))
+
+table2 <- table1 %>% gather(key = "year", value = "pop", "1999", "2000")
+
+table2 %>% filter(year == "2000")
+table2 %>% filter(country == "Nigeria")
+
+#to undo table2, we use spread
+table2 %>% spread(key = "year", value = "pop")
+```
+
+We use `gather()` when we notice that we have columns that are not variables. Therefore, we gather all the columns from `new_sp_m014` to `newrel_f65` into a new column with the generic name `key` --- for lack of knowledge of what these values represent.
+
+```{r gather}
+who1 <- who %>% 
+  gather(key = "key", value = "cases", 5:60)
+
+#check the dimension of the new dataset
+dim(who1)
+```
+
+Do you notice that the new dataset `who1` has more rows and less columns than the previous one? What do you think is the reason for this?
+
+### Data Cleaning
+Next, we see that there are a lot of missing `cases`;for now we filter them out so we can focus on the non-missing values.
+
+```{r}
+#check for columns with missing values
+gg_miss_var(who1)
+
+#filter out missing values
+who1 <- who1 %>% #overide the previous `who1`
+  filter(!is.na(cases)) #note: `filter()` is used to manipulate rows
+
+#we can gather and filter at once
+who %>%
+  gather(key = "key", value = "cases", new_sp_m014:newrel_f65) %>%
+  filter(!is.na(cases))
+
+#count number of cases for each keys
+who1 %>% 
+  count(key)
+```
+
+Now we trun our attention to what the values of the `key` mean. The data dictionary tells us that:
+
+* The first three letters indicate whether the TB cases are old or new  
+* The next two letters describe the type of TB:
+
+    + `sp` --- smear positive cases of pulmonary TB  
+    + `sn` --- smear negative cases of pulmonary TB  
+    + `ep` --- cases of extrapulmonary TB  
+    + `rel`  --- cases of relapse
+* The sixth letter indicates the sex of the TB patients (m or f)  
+* The remaining numbers tells us the age group of the patients
+
+    + 014 = 0 - 14 
+    + 1524 = 15 - 24
+    + 2534 = 25 - 34
+    + 3544 = 35 - 44
+    + 4554 = 45 - 54
+    + 5564 = 55 - 64
+    + 65 = 65 or older
+  
+This tells us we need to separate the key column into individual columns. We could easily do this by breaking up the column at the position where there is an underscore '_'. In order to do that, we first have to ensure that the names follow the same pattern, i.e. converting `newrel` to `new_rel`. We can do this using the `str_replace` function from the `stringr` package.
+
+```{r string replace}
+library(stringr)
+
+#replace "newrel" with "new_rel"
+who2 <- who1 %>% mutate(key = str_replace(key, "newrel", "new_rel"))
+
+#confirm replacement
+tail(who2)
+```
+
+Now we can separate the values of `key` using `separate()`.
+
+```{r separate columns}
+who3 <- who2 %>% separate(key, into = c("new", "type", "sexage"), sep = "_")
+```
+
+Next, we separate `sexage` into `sex` and `age` by splitting it after the first character.
+
+```{r separate sexage}
+who4 <- who3 %>% 
+  separate(sexage, c("sex", "age"), sep = 1)
+```
+
+We can now drop redundant variables using `select()`.
+
+```{r drop redundant}
+#drop iso2, iso3, new
+who5 <- who4 %>% select(-contains('iso'), -new) %>% # 'select' is used to manipulate columns just as 'filter' is used to manipulate rows
+  rename(age_group = age)
+
+#other ways of selecting: 1
+who6 <- who4 %>% select(-c(iso2, iso3, new)) %>% # 'select' is used to manipulate columns just as 'filter' is used to manipulate rows
+  rename(age_group = age)
+
+#other ways of selecting: 2
+who7 <- who4 %>% select(-starts_with('iso'), -new) %>% # 'select' is used to manipulate columns just as 'filter' is used to manipulate rows
+  rename(age_group = age)
+
+#compare the datasets
+identical(who5, who6)
+identical(who5, who7)
+
+#check first few rows
+head(who7)
+```
+
+The `who` dataset is now tidy!
+
+It is possible to do all these steps at once using the pipe operator:
+
+```{r complex pipe}
+who %>% 
+  gather(key = "key", value = "cases", new_sp_m014:newrel_f65) %>%
+  filter(!is.na(cases)) %>%
+  mutate(key = str_replace(key, "newrel", "new_rel")) %>%
+  separate(key, c("new", "type", "sexage"), sep = "_") %>% 
+  separate(sexage, c("sex", "age"), sep = 1) %>% 
+  select(-contains("iso"), -new) %>%
+  rename(age_group = age)
+  
+```
+
+
+### Analysis
+We compute the total number of cases of TB for each country, year, and sex. We visualize our results.
+```{r analysis}
+#compute total cases by country, year and sex
+who8 <- who5 %>% 
+  group_by(country, year, sex) %>% 
+  summarize_at("cases", sum) %>% 
+  ungroup() 
+
+#check data for a particular country
+head(who8 %>% filter(country == "Germany"))
+
+#total cases by country and year
+who8 %>% 
+  filter(country %in% c("Germany", "Brazil", "Nigeria", "Colombia", "India", "Canada", "China", "France")) %>% 
+  ggplot(aes(x = year, y = cases)) +
+  geom_col() +
+  labs(title = "Total Number of TB Cases",
+      subtitle = "By Country and Year",
+      x = NULL) +
+  facet_wrap(~ country, scales = "free", ncol = 2)
+
+#total cases by country, year (after 2000) and sex
+who8 %>% 
+  filter(country %in% c("Germany", "Brazil", "Nigeria", "Colombia", "India", "Canada", "China", "France"),
+         year >= 2000) %>% 
+  ggplot(aes(x = year, y = cases, fill = sex)) +
+  geom_col(position = "dodge") +
+  labs(title = "Total Number of TB Cases",
+      subtitle = "By Country, Year (post 2000), and Sex",
+      x = NULL) +
+  facet_wrap(~ country, scales = "free", ncol = 2) +
+  theme_light()
+
+#Proportion of cases by sex for each country (after 2000) and year
+who8 %>% 
+  filter(country %in% c("Germany", "Brazil", "Nigeria", "Colombia", "India", "Canada", "China", "France"),
+         year >= 2000) %>% 
+  ggplot(aes(x = year, y = cases, fill = sex)) +
+  geom_col(position = "fill") +
+  labs(title = "Proportion of TB Cases by Sex",
+      subtitle = "For each Country and Year(post 2000)",
+      x = NULL) +
+  facet_wrap(~ country, scales = "free", ncol = 2) +
+  theme_light()
+```
+
