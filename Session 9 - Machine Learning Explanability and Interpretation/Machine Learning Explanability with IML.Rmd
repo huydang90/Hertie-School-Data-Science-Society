@@ -1,0 +1,356 @@
+---
+title: "Machine Learning Explanability"
+author: "Huy Dang"
+date: "11/18/2019"
+output: html_document
+---
+
+The iml package is probably the most robust ML interpretability package available. It provides both global and local model-agnostic interpretation methods. Although the interaction functions are notably slow, the other functions are faster or comparable to existing packages we use or have tested. I definitely recommend adding iml to your preferred ML toolkit. The following provides a quick list of some of its pros and cons:
+
+## Advantages
+
+* ML model and package agnostic: can be used for any supervised ML model (many features are only relevant to regression and binary classification problems).
+* Variable importance: uses a permutation-based approach for variable importance, which is model agnostic, and accepts any loss function to assess importance.
+* Partial dependence plots: Fast PDP implementation and allows for ICE curves.
+* H-statistic: one of only a few implementations to allow for assessing interactions.
+* Local interpretation: provides both LIME and Shapley implementations.
+* Plots: built with ggplot2 which allows for easy customization
+
+## Disadvantages
+
+* Does not allow for easy comparisons across models like DALEX.
+* The H-statistic interaction functions do not scale well to wide data (may predictor variables).
+* Only provides permutation-based variable importance scores (which become slow as number of features increase).
+* LIME implementation has less flexibilty and features than lime.
+
+
+```{r}
+# load required packages
+library(rsample)   # data splitting
+library(ggplot2)   # allows extension of visualizations
+library(dplyr)     # basic data transformation
+library(h2o)       # machine learning modeling
+library(iml)       # ML interprtation
+
+# initialize h2o session
+h2o.no_progress()
+h2o.init()
+```
+
+We will use the employee attrition data that has been included in the rsample package. This demonstrates a binary classification problem: whether the employee leaves the job or not (“Yes” vs. “No”). There are a number of factors that might influence this decision and we want to know how each factors can contribute to predicting whether an employee might leave.  
+
+
+```{r}
+# classification data
+df <- rsample::attrition %>% 
+  mutate_if(is.ordered, factor, ordered = FALSE) %>%
+  mutate(Attrition = recode(Attrition, "Yes" = "1", "No" = "0") %>% factor(levels = c("1", "0")))
+
+# convert to h2o object
+df.h2o <- as.h2o(df)
+
+# create train, validation, and test splits
+set.seed(123)
+splits <- h2o.splitFrame(df.h2o, ratios = c(.7, .15), destination_frames = c("train","valid","test"))
+names(splits) <- c("train","valid","test")
+
+# variable names for resonse & features
+y <- "Attrition"
+x <- setdiff(names(df), y) 
+
+```
+
+We will explore how to visualize a few of the more common machine learning algorithms implemented with h2o. For brevity, default models are used and hyperparameter tuning are not emphasized. The following produces a regularized logistic regression, random forest, and gradient boosting machine models.
+
+
+```{r}
+# elastic net model 
+glm <- h2o.glm(
+  x = x, 
+  y = y, 
+  training_frame = splits$train,
+  validation_frame = splits$valid,
+  family = "binomial",
+  seed = 123
+  )
+
+# random forest model
+rf <- h2o.randomForest(
+  x = x, 
+  y = y,
+  training_frame = splits$train,
+  validation_frame = splits$valid,
+  ntrees = 1000,
+  stopping_metric = "AUC",    
+  stopping_rounds = 10,         
+  stopping_tolerance = 0.005,
+  seed = 123
+  )
+
+# gradient boosting machine model
+gbm <-  h2o.gbm(
+  x = x, 
+  y = y,
+  training_frame = splits$train,
+  validation_frame = splits$valid,
+  ntrees = 1000,
+  stopping_metric = "AUC",    
+  stopping_rounds = 10,         
+  stopping_tolerance = 0.005,
+  seed = 123
+  )
+
+```
+
+```{r}
+# model performance
+h2o.auc(glm, valid = TRUE)
+## [1] 0.7870935
+h2o.auc(rf, valid = TRUE)
+## [1] 0.7681021
+h2o.auc(gbm, valid = TRUE)
+## [1] 0.7468242
+
+```
+
+# Interpretable Machine Learning
+
+In order to work with iml, we need to adapt our data:
+
+1. Create a data frame with just the features (must be of class data.frame, cannot be an H2OFrame or other class).
+
+2. Create a vector with the actual responses (must be numeric – 0/1 for binary classification problems).
+
+3. iml has internal support for some machine learning packages (i.e. mlr, caret, randomForest). However, to use iml with several of the more popular packages being used today (i.e. h2o, ranger, xgboost) we need to create a custom function that will take a data set (again must be of class data.frame) and provide the predicted values as a vector.
+
+```{r}
+# 1. create a data frame with just the features
+features <- as.data.frame(splits$valid) %>% select(-Attrition)
+
+# 2. Create a vector with the actual responses
+response <- as.numeric(as.vector(splits$valid$Attrition))
+
+# 3. Create custom predict function that returns the predicted values as a
+#    vector (probability of purchasing in our example)
+pred <- function(model, newdata)  {
+  results <- as.data.frame(h2o.predict(model, as.h2o(newdata)))
+  return(results[[3L]])
+}
+
+# example of prediction output
+pred(rf, features) %>% head()
+
+```
+```{r}
+# create predictor object to pass to explainer functions
+predictor.glm <- Predictor$new(
+  model = glm, 
+  data = features, 
+  y = response, 
+  predict.fun = pred,
+  class = "classification"
+  )
+
+predictor.rf <- Predictor$new(
+  model = rf, 
+  data = features, 
+  y = response, 
+  predict.fun = pred,
+  class = "classification"
+  )
+
+predictor.gbm <- Predictor$new(
+  model = gbm, 
+  data = features, 
+  y = response, 
+  predict.fun = pred,
+  class = "classification"
+  )
+# structure of predictor object
+str(predictor.gbm)
+
+```
+
+## GLOBAL INTERPRETATION
+
+### FEATURE IMPORTANCE
+
+```{r}
+# Feature Importance 
+
+# compute feature importance with specified loss metric
+imp.glm <- FeatureImp$new(predictor.glm, loss = "mse")
+imp.rf <- FeatureImp$new(predictor.rf, loss = "mse")
+imp.gbm <- FeatureImp$new(predictor.gbm, loss = "mse")
+
+# plot output
+p1 <- plot(imp.glm) + ggtitle("GLM")
+p2 <- plot(imp.rf) + ggtitle("RF")
+p3 <- plot(imp.gbm) + ggtitle("GBM")
+
+gridExtra::grid.arrange(p1, nrow = 1)
+gridExtra::grid.arrange(p2, nrow = 1)
+gridExtra::grid.arrange(p3, nrow = 1)
+
+```
+
+### PARTIAL DEPENDENCE PLOTS
+
+Binary feature: OverTime
+
+```{r}
+glm.ot <- Partial$new(predictor.glm, "OverTime") %>% plot() + ggtitle("GLM")
+rf.ot <- Partial$new(predictor.rf, "OverTime") %>% plot() + ggtitle("RF") 
+gbm.ot <- Partial$new(predictor.gbm, "OverTime") %>% plot() + ggtitle("GBM")
+
+gridExtra::grid.arrange(glm.ot, rf.ot, gbm.ot, nrow = 1)
+
+```
+
+Continuous features: Age
+
+The following compares the marginal impact of age on the probability of attriting. The regularized regression model shows a monotonic decrease in the probability (the log-odds probability is linear) while the two tree-based approaches capture the non-linear, non-monotonic relationship.
+
+
+```{r}
+# GLM model
+glm.age <- Partial$new(predictor.glm, "Age", ice = TRUE, grid.size = 50)
+glm.age$center(min(features$Age))
+p1 <- plot(glm.age) + ggtitle("GLM")
+
+# RF model
+rf.age <- Partial$new(predictor.rf, "Age", ice = TRUE, grid.size = 50)
+rf.age$center(min(features$Age))
+p2 <- plot(rf.age) + ggtitle("RF")
+
+# GBM model
+gbm.age <- Partial$new(predictor.gbm, "Age", ice = TRUE, grid.size = 50)
+gbm.age$center(min(features$Age))
+p3 <- plot(gbm.age) + ggtitle("GBM")
+
+gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
+```
+
+Assess how the interaction of MonthlyIncome and OverTime influences the predicted probability of attrition for all three models
+
+```{r}
+p1 <- Partial$new(predictor.glm, c("MonthlyIncome", "OverTime")) %>% 
+    plot() + ggtitle("GLM") + ylim(c(0, .4))
+p2 <- Partial$new(predictor.rf, c("MonthlyIncome", "OverTime")) %>% 
+    plot() + ggtitle("RF") + ylim(c(0, .4))
+p3 <- Partial$new(predictor.gbm, c("MonthlyIncome", "OverTime")) %>% plot() + 
+    ggtitle("GBM") + ylim(c(0, .4))
+
+gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
+
+```
+
+### Feature Interaction
+
+A measure of how strongly features interact with each other in forming the predicted outcomes. 
+
+The intereaction strength (rho) will be between 0 when there is no interaction at all and 1 if all of variation of the predicted outcome depends on a given interaction.
+
+All three models capture different interaction structures although some commonalities exist for different models (i.e. OverTime, Age, JobRole). The interaction effects are stronger in the tree based models versus the GLM model, with the GBM model having the strongest interaction effect of 0.4.
+
+
+```{r}
+# identify variables with largest interactions in each model
+interact.glm <- Interaction$new(predictor.glm) %>% 
+    plot() + ggtitle("GLM")
+interact.rf  <- Interaction$new(predictor.rf) %>% 
+    plot() + ggtitle("RF")
+interact.gbm <- Interaction$new(predictor.gbm) %>% 
+    plot() + ggtitle("GBM")
+
+# plot
+gridExtra::grid.arrange(interact.glm, nrow = 1)
+gridExtra::grid.arrange(interact.rf, nrow = 1)
+gridExtra::grid.arrange(interact.gbm, nrow = 1)
+
+```
+
+LOCAL INTERPRETATION: 
+
+LIME: 
+
+The following fits a local model for the observation with the highest probability of attrition. The results show that the Age of the employee reduces the probability of attrition within all three models. Morever, all three models show that since this employee works OverTime, this is having a sizable increase in the probability of attrition. However, the tree-based models also identify the MaritalStatus and JobRole of this employee contributing to his/her increased probability of attrition.
+
+
+```{r}
+# identify obs with highest and lowest probabilities
+(high <- predict(rf, splits$valid) %>% .[, 3] %>% as.vector() %>% which.max()) 
+## [1] 154
+(low  <- predict(rf, splits$valid) %>% .[, 3] %>% as.vector() %>% which.min())  
+## [1] 28
+# get these observations
+high_prob_ob <- features[high, ]
+low_prob_ob  <- features[low, ]
+
+```
+
+
+```{r}
+# fit local model
+lime.glm <- LocalModel$new(predictor.glm, k = 10, x.interest = high_prob_ob) %>% 
+    plot() + ggtitle("GLM")
+lime.rf  <- LocalModel$new(predictor.rf, k = 10, x.interest = high_prob_ob) %>% 
+    plot() + ggtitle("RF")
+lime.gbm <- LocalModel$new(predictor.gbm, k = 10, x.interest = high_prob_ob) %>% 
+    plot() + ggtitle("GBM")
+
+gridExtra::grid.arrange(lime.glm, nrow = 1)
+gridExtra::grid.arrange(lime.rf, nrow = 1)
+gridExtra::grid.arrange(lime.gbm, nrow = 1)
+
+```
+
+```{r}
+# fit local model
+lime.glm <- LocalModel$new(predictor.glm, k = 10, x.interest = low_prob_ob) %>% 
+    plot() + ggtitle("GLM")
+lime.rf  <- LocalModel$new(predictor.rf, k = 10, x.interest = low_prob_ob) %>% 
+    plot() + ggtitle("RF")
+lime.gbm <- LocalModel$new(predictor.gbm, k = 10, x.interest = low_prob_ob) %>% 
+    plot() + ggtitle("GBM")
+
+gridExtra::grid.arrange(lime.glm, nrow = 1)
+gridExtra::grid.arrange(lime.rf, nrow = 1)
+gridExtra::grid.arrange(lime.gbm, nrow = 1)
+
+```
+
+SHAP Value
+
+OverTime is a common theme across all three models. We also see MonthlyIncome influential for the tree-based methods and there are other commonalities for the mildly influential variables across all three models
+
+```{r}
+# compute Shapley values
+shapley.rf <- Shapley$new(predictor.rf, x.interest = high_prob_ob)
+
+# look at summary of results
+shapley.rf
+
+```
+
+```{r}
+#plot results
+plot(shapley.rf)
+
+```
+
+```{r}
+shapley.glm <- Shapley$new(predictor.glm, x.interest = high_prob_ob) %>% 
+    plot() + ggtitle("GLM")
+shapley.rf  <- plot(shapley.rf) + ggtitle("RF")
+shapley.gbm <- Shapley$new(predictor.gbm, x.interest = high_prob_ob) %>% 
+    plot() + ggtitle("GBM")
+
+gridExtra::grid.arrange(shapley.glm, nrow = 1)
+gridExtra::grid.arrange(shapley.rf, nrow = 1)
+gridExtra::grid.arrange(shapley.gbm, nrow = 1)
+
+```
+
+Shapley values are considered more robust than the results you will get from LIME. However, similar to the different ways you can compute variable importance, although you will see differences between the two methods often you will see common variables being identified as highly influential in both approaches. Consequently, we should use these approaches to help indicate influential variables but not to definitively label a variables as the most influential.
+
