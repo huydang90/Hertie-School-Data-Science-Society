@@ -1,0 +1,243 @@
+---
+title: "Machine Learning"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+evaluation <- function(prediction, target) {
+    t <- table(prediction, target)[2:1,2:1]
+    
+    accuracy <- (t[1,1]+t[2,2])/(t[1,1]+t[1,2]+t[2,1]+t[2,2])*100
+    
+    recall <- (t[1,1]/(t[1,1]+t[2,1]))*100
+    
+    precision <- (t[1,1]/(t[1,1]+t[1,2]))*100
+
+    cat("Accuracy:  ", accuracy, "% of all cases are correctly predicted by the model. \n")
+    cat("Recall: ", recall, "% of the true 1s were also predicted by the model as 1s. \n")
+    cat("Precision:   ", precision, "% of the predicted 1s are true 1s. \n")
+    cat("Confusion matrix: ", "\n")
+    t
+}
+```
+
+
+```{r}
+#download datasets, save them somewhere
+
+setwd("C:/Users/grade/OneDrive/Studium/Berlin/Data Club/Fall 2019/8 Machine Learning")
+
+load("income.RData")
+
+```
+
+
+```{r}
+#explore the dataset
+dim
+head
+```
+
+```{r}
+#randomly split the dataset
+set.seed(12)
+samples <- sample(nrow(income), 0.6*nrow(income))
+samples
+```
+
+```{r}
+#create a trainingset
+trainingset <- income[samples, ]
+trainingset
+```
+
+```{r}
+#create a testset and look closer
+testset <- income[-samples, ]
+testset
+```
+
+```{r}
+#separate the true values of the target variable in the test set
+test_target <- income[-samples, 5]
+test_target
+```
+
+```{r}
+#build your model on the training set
+training_model <- glm(Geschlecht ~ Haarlaenge, data = trainingset, family = "binomial")
+```
+
+```{r}
+#test your model on the test set
+test_probabilities <- predict(training_model, newdata = testset, type = "response")
+test_probabilities
+```
+
+
+```{r}
+#convert the probabilities into clear yes/no predictions
+test_predictions <- ifelse(test= test_probabilities>0.5, yes = "W", no = "M")
+test_predictions
+```
+
+
+```{r}
+#evaluate your model
+evaluation(test_predictions, test_target)
+```
+
+
+
+##Predicting fraud
+```{r}
+#load the data
+transactions <- readRDS(file = "transactions.rds")
+```
+
+```{r}
+# Check out the data
+head(transactions)
+
+# keep in mind that the dataset is quite big (2,770,409 observations!)
+```
+
+- isFraud - explains if transaction was a fraud or not (agent-based simulation), 1 is fraud,   0 is no fraud
+- amount - amount of money in local currency
+- oldbalanceOrg - account balance of sender before transaction
+- newbalanceOrig - new account balance of sender after transaction
+- oldbalanceDest - old account balance of receiver before transaction
+- newbalanceDest - new account balance of receiver after transaction
+- hour - states the hour of the day in which the transaction occurred
+- type - type of transaction, 1 if transation was a CASH-OUT, 0 if it was a TRANSFER
+
+```{r}
+# First, split the dataset into a training and a test set
+# Randomly save 80% of the observations in an object "samples"
+
+set.seed(12) 
+samples <- sample(nrow(transactions), 0.8*nrow(transactions))
+```
+
+```{r}
+# Next, save all observations in "samples" into a separate training set
+
+train <- transactions[samples,]
+
+# Square brackets behind an object allow you to access observations (before the comma) and/or variables (behind the comma)
+```
+
+```{r}
+# Now, save all transactions that are not in "samples" in a testset
+# Advice: "-" excludes certain observations
+
+test <- transactions[-samples,]
+```
+
+```{r}
+# Next, you would like to save the true values of the target variable "isFraud" separately to be able to compare your predictions to them later on
+# Advice: use the same technique as before but specify the variable as well
+
+test_target <- transactions[-samples, 1]
+```
+
+```{r}
+# Now it is time to build the model. For that, we take the logistic regression (the command is glm()). Save the model in an object. 
+# Advice: if you want to use all variables to predict isFraud, you can use a "." behind the "~". / the argument family is "binomial" in our case. 
+
+# Which dataset to we use to build the model?
+
+
+training_model <- glm(isFraud~., data =  train, family = "binomial")
+
+# This may take a minute
+```
+
+```{r}
+# Now, we would like to test the trained model - which data do we use for that?
+# Use the command predict() to do so
+
+
+test_prob <- predict(training_model, 
+                             newdata = test, 
+                             type="response")
+
+# Advice: specify the model and use "newdata" to specify which data you want to test on
+```
+
+
+```{r}
+# Change the probabilities to clear yes/no predictions, use ifelse() to do so
+
+test_pred <- ifelse(test = test_prob>0.5, yes = 1, no = 0)
+
+# Advice: you need to specify three arguments: what you want to test, what the value shall become if the condition meets and what if it does not
+```
+
+```{r}
+# Evaluate the model and use evaluation() for that
+
+evaluation(test_pred, test_target)
+```
+
+
+### XGBoost works better in this case - demonstration
+```{r}
+library(caret)
+library(caTools)
+library(rpart)
+library(xgboost)
+```
+
+```{r}
+# Load the data
+transactions_0 <- readRDS(file = "transactions1.rds")
+
+# Splitting data into training and test sets
+set.seed(1)
+spl <- sample.split(transactions_0$isFraud, 0.8)
+train_0 <- transactions_0[spl == TRUE,]
+test_0 <- transactions_0[spl == FALSE,]
+```
+
+```{r}
+# Converting the data into the form needed by XGBoost
+# training set only x variables
+x_train <- as.matrix(train_0[,-6])
+# training set only y variable
+y_train <- as.numeric(as.character(train_0$isFraud))
+
+# test set only x variables
+x_test <- as.matrix(test_0[,-6])
+# test set only y variable - target variable to test on
+test_target <- as.numeric(as.character(test_0$isFraud))
+
+# the form XGBoost needs
+train_XGB <- xgb.DMatrix(data = x_train, label = y_train)
+test_XGB <- xgb.DMatrix(data = x_test, label = test_target)
+```
+
+```{r}
+# Specify wanted parameters
+parameter <- list(booster="gbtree", max_depth = 2, eval_metric= "error", objective = "binary:logistic")
+
+
+# Build the model
+set.seed(1)
+training_model <- xgb.train(data= train_XGB, params=parameter, nrounds = 11, watchlist = list(test_set= test_XGB, train_set= train_XGB))
+```
+
+```{r}
+# Application of model on test set
+test_prob <- predict(training_model, newdata = test_XGB, type ="response")
+
+#Converting probabilities into predictions
+test_pred <- ifelse(test_prob > 0.5, 1, 0)
+```
+
+```{r}
+evaluation(test_pred, test_target)
+```
+
